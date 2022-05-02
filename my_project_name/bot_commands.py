@@ -132,18 +132,18 @@ class Command:
                     self.store.update_or_create_fail(
                         self.event.sender, self.room.room_id
                     )
-                    await send_msg(
+                    new_room_id = await send_msg(
                         self.client,
                         self.event.sender,
-                        "WARNING!",
                         f"Your comment has been deleted {fails+1} times in {self.room.room_id} discussion due to being improperly sent. Please reply in threads.",
+                        roomname ="WARNING!",
                     )
                     await send_msg(
                         self.client,
                         self.event.sender,
-                        "WARNING!",
                         "media/info_threads.gif",
                         True,
+                        room_id = new_room_id,
                     )
                     
                 else:

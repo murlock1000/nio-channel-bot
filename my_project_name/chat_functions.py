@@ -298,35 +298,36 @@ async def _send_task(client: AsyncClient, room_id: str, send_method: staticmetho
     await send_method(client, room_id, content)
 
 
-async def send_msg(client: AsyncClient, mxid: str, roomname: str, content: str, is_image: bool = False):
+async def send_msg(client: AsyncClient, mxid: str, content: str, is_image: bool = False, room_id: str = None, roomname: str = ""):
     """
     :Code from - https://github.com/vranki/hemppa/blob/dcd69da85f10a60a8eb51670009e7d6829639a2a/bot.py
     :param mxid: A Matrix user id to send the message to
     :param roomname: A Matrix room id to send the message to
     :param message: Text to be sent as message
-    :return bool: Success upon sending the message
+    :return bool: Returns room id upon sending the message
     """
     # Sends private message to user. Returns true on success.
-    msg_room = await find_or_create_private_msg(client, mxid, roomname)
-    if not msg_room or (type(msg_room) is RoomCreateError):
-        logger.error(f"Unable to create room when trying to message {mxid}")
-        return False
+    if room_id is None:
+        msg_room = await find_or_create_private_msg(client, mxid, roomname)
+        if not msg_room or (type(msg_room) is RoomCreateError):
+            logger.error(f"Unable to create room when trying to message {mxid}")
+            return None
+        room_id = msg_room.room_id
 
     """
     : A concurrency problem: creating a new room does not sync the local data about rooms.
     : In order to perform the sync, we must exit the callback.
     : Solution: use an asyncio task, that performs the sync.wait() and sends the message afterwards concurently with sync_forever().
     """
-        #await send_image_to_room(client, room_id, "media/info_threads.gif")
     if is_image:
         asyncio.get_event_loop().create_task(
-            _send_task(client, msg_room.room_id, send_image_to_room, content)
+            _send_task(client, room_id, send_image_to_room, content)
         )
     else:
         asyncio.get_event_loop().create_task(
-            _send_task(client, msg_room.room_id, send_text_to_room, content)
+            _send_task(client, room_id, send_text_to_room, content)
         )
-    return True
+    return room_id
 
 
 async def find_or_create_private_msg(
