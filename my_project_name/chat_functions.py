@@ -21,8 +21,16 @@ from nio import (
     RoomSendResponse,
     RoomVisibility,
     SendRetryError,
+    UploadResponse,
 )
 from nio.http import TransportResponse
+
+# File sending prerequisites
+import aiofiles
+import aiofiles.os
+import os
+import magic
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +88,120 @@ async def send_text_to_room(
         )
     except (SendRetryError, LocalProtocolError):
         logger.exception(f"Unable to send message response to {room_id}")
+    
+
+async def send_image_to_room(
+    client: AsyncClient,
+    room_id: str,
+    file: str,
+) -> Union[RoomSendResponse, ErrorResponse]:
+    """Process file.
+    Upload file to server and then send link to rooms.
+    Works and tested for .pdf, .txt, .ogg, .wav.
+    All these file types are treated the same.
+    Arguments:
+    ---------
+    client : Client
+    rooms : list
+        list of room_id-s
+    file : str
+        file name of file from --file argument
+    This is a working example for a PDF file.
+    It can be viewed or downloaded from:
+    https://matrix.example.com/_matrix/media/r0/download/
+        example.com/SomeStrangeUriKey # noqa
+    {
+        "type": "m.room.message",
+        "sender": "@someuser:example.com",
+        "content": {
+            "body": "example.pdf",
+            "info": {
+                "size": 6301234,
+                "mimetype": "application/pdf"
+                },
+            "msgtype": "m.file",
+            "url": "mxc://example.com/SomeStrangeUriKey"
+        },
+        "origin_server_ts": 1595100000000,
+        "unsigned": {
+            "age": 1000,
+            "transaction_id": "SomeTxId01234567"
+        },
+        "event_id": "$SomeEventId01234567789Abcdef012345678",
+        "room_id": "!SomeRoomId:example.com"
+    }
+    """
+    if not os.path.isfile(file):
+        logger.debug(f"File {file} is not a file. Doesn't exist or "
+                     "is a directory."
+                     "This file is being droppend and NOT sent.")
+        return
+
+    # # restrict to "txt", "pdf", "mp3", "ogg", "wav", ...
+    # if not re.match("^.pdf$|^.txt$|^.doc$|^.xls$|^.mobi$|^.mp3$",
+    #                os.path.splitext(file)[1].lower()):
+    #    logger.debug(f"File {file} is not a permitted file type. Should be "
+    #                 ".pdf, .txt, .doc, .xls, .mobi or .mp3 ... "
+    #                 f"[{os.path.splitext(file)[1].lower()}]"
+    #                 "This file is being droppend and NOT sent.")
+    #    return
+
+    # 'application/pdf' "plain/text" "audio/ogg"
+    mime_type = magic.from_file(file, mime=True)
+    # if ((not mime_type.startswith("application/")) and
+    #        (not mime_type.startswith("plain/")) and
+    #        (not mime_type.startswith("audio/"))):
+    #    logger.debug(f"File {file} does not have an accepted mime type. "
+    #                 "Should be something like application/pdf. "
+    #                 f"Found mime type {mime_type}. "
+    #                 "This file is being droppend and NOT sent.")
+    #    return
+
+    # first do an upload of file
+    # see https://matrix-nio.readthedocs.io/en/latest/nio.html#nio.AsyncClient.upload # noqa
+    # then send URI of upload to room
+
+    file_stat = await aiofiles.os.stat(file)
+    async with aiofiles.open(file, "r+b") as f:
+        resp, maybe_keys = await client.upload(
+            f,
+            content_type=mime_type,  # application/pdf
+            filename=os.path.basename(file),
+            filesize=file_stat.st_size)
+    if (isinstance(resp, UploadResponse)):
+        logger.debug("File was uploaded successfully to server. "
+                     f"Response is: {resp}")
+    else:
+        logger.info(f"Failed to upload file to server. "
+                    "Please retry. This could be temporary issue on "
+                    "your server. "
+                    "Sorry.")
+        logger.info(f"file=\"{file}\"; mime_type=\"{mime_type}\"; "
+                    f"filessize=\"{file_stat.st_size}\""
+                    f"Failed to upload: {resp}")
+
+    content = {
+        "body": os.path.basename(file),  # descriptive title
+        "info": {
+            "size": file_stat.st_size,
+            "mimetype": mime_type,
+        },
+        "msgtype": "m.image",
+        "url": resp.content_uri,
+    }
+
+    try:
+        await client.room_send(
+            room_id,
+            message_type="m.room.message",
+            content=content
+        )
+        logger.debug(f"This file was sent: \"{file}\" "
+                     f"to room \"{room_id}\".")
+    except Exception:
+        logger.debug(f"File send of file {file} failed. "
+                     "Sorry. Here is the traceback.")
+        logger.debug(traceback.format_exc())
 
 
 def make_pill(user_id: str, displayname: str = None) -> str:
@@ -166,17 +288,17 @@ async def decryption_failure(self, room: MatrixRoom, event: MegolmEvent) -> None
     )
 
 
-async def _send_msg_task(client: AsyncClient, room_id: str, message: str):
+async def _send_task(client: AsyncClient, room_id: str, send_method: staticmethod, content: str):
     """
     : Wait for new sync, until we receive the new room information
-    : Send the message to tge riin
+    : Send the message to the room
     """
     while client.rooms.get(room_id) is None:
         await client.synced.wait()
-    await send_text_to_room(client, room_id, message)
+    await send_method(client, room_id, content)
 
 
-async def send_msg(client: AsyncClient, mxid: str, roomname: str, message: str):
+async def send_msg(client: AsyncClient, mxid: str, roomname: str, content: str, is_image: bool = False):
     """
     :Code from - https://github.com/vranki/hemppa/blob/dcd69da85f10a60a8eb51670009e7d6829639a2a/bot.py
     :param mxid: A Matrix user id to send the message to
@@ -195,9 +317,15 @@ async def send_msg(client: AsyncClient, mxid: str, roomname: str, message: str):
     : In order to perform the sync, we must exit the callback.
     : Solution: use an asyncio task, that performs the sync.wait() and sends the message afterwards concurently with sync_forever().
     """
-    asyncio.get_event_loop().create_task(
-        _send_msg_task(client, msg_room.room_id, message)
-    )
+        #await send_image_to_room(client, room_id, "media/info_threads.gif")
+    if is_image:
+        asyncio.get_event_loop().create_task(
+            _send_task(client, msg_room.room_id, send_image_to_room, content)
+        )
+    else:
+        asyncio.get_event_loop().create_task(
+            _send_task(client, msg_room.room_id, send_text_to_room, content)
+        )
     return True
 
 

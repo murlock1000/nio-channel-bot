@@ -138,6 +138,14 @@ class Command:
                         "WARNING!",
                         f"Your comment has been deleted {fails+1} times in {self.room.room_id} discussion due to being improperly sent. Please reply in threads.",
                     )
+                    await send_msg(
+                        self.client,
+                        self.event.sender,
+                        "WARNING!",
+                        "media/info_threads.gif",
+                        True,
+                    )
+                    
                 else:
                     logger.info(
                         f"{self.room.user_name(self.event.sender)} has been banned from room {self.room.room_id}"
@@ -154,9 +162,9 @@ class Command:
                         self.client,
                         self.event.sender,
                         "WARNING!",
-                        f"You have made >3 improper comments in {self.room.room_id} discussion. Please seek help from the group admin",
+                        f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admin",
                     )
             else:
                 logger.error(
-                    f"Bot does not have sufficient power to redact others in group: {self.room.room_id}"
+                    f"Bot does not have sufficient power to redact others in group: {self.room.name}"
                 )
