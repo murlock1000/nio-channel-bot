@@ -8,7 +8,7 @@ from typing import Any, Dict
 # the version specified here.
 #
 # When a migration is performed, the `migration_version` table should be incremented.
-latest_migration_version = 0
+latest_migration_version = 1
 
 logger = logging.getLogger(__name__)
 
@@ -121,15 +121,23 @@ class Storage:
         """
         logger.debug("Checking for necessary database migrations...")
 
-        # if current_migration_version < 1:
-        #    logger.info("Migrating the database from v0 to v1...")
-        #
-        #    # Add new table, delete old ones, etc.
-        #
-        #    # Update the stored migration version
-        #    self._execute("UPDATE migration_version SET version = 1")
-        #
-        #    logger.info("Database migrated to v1")
+        if current_migration_version < 1:
+            logger.info("Migrating the database from v0 to v1...")
+        
+            # Add new table, delete old ones, etc.
+            # Add table for storing uploaded media file uris, so we don't have to reupload them to the server each time
+            self._execute(
+            """
+            CREATE TABLE static_media_uris (
+                filename TEXT UNIQUE NOT NULL,
+                uri TEXT NOT NULL
+            )
+            """
+        )
+            # Update the stored migration version
+            self._execute("UPDATE migration_version SET version = 1")
+        
+            logger.info("Database migrated to v1")
 
     def _execute(self, *args) -> None:
         """A wrapper around cursor.execute that transforms placeholder ?'s to %s for postgres.
@@ -143,6 +151,48 @@ class Storage:
             self.cursor.execute(args[0].replace("?", "%s"), *args[1:])
         else:
             self.cursor.execute(*args)
+
+    def delete_uri(self, filename: str):
+        """Delete a uri entry via its filename"""
+        self._execute(
+            """
+            DELETE FROM static_media_uris WHERE filename = ?
+        """,
+            ((filename,))
+        )
+
+    def get_uri(self, filename):
+        """Get the uri of a file by the filename"""
+
+        self._execute(
+            """
+            SELECT uri FROM static_media_uris
+            WHERE filename = ?
+        """,
+            ((filename,)),
+        )
+
+        row = self.cursor.fetchone()
+        if row is not None:
+            return row[0]
+        return None
+    
+    def set_uri(self, filename, uri):
+        """Create a new URI for a file with filename"""
+        self._execute(
+            """
+            INSERT INTO static_media_uris (
+                filename,
+                uri
+            ) VALUES(
+                ?, ?
+            )
+        """,
+            (
+                filename,
+                uri,
+            ),
+        )
 
     def update_or_create_fail(self, user_id, room_id):
         """Create a new fail entry, or increment an existing one"""

@@ -13,7 +13,7 @@ from nio import (
 )
 
 from my_project_name.bot_commands import Command
-from my_project_name.chat_functions import make_pill, react_to_event, send_text_to_room
+from my_project_name.chat_functions import ChatFunctions
 from my_project_name.config import Config
 from my_project_name.storage import Storage
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class Callbacks:
-    def __init__(self, client: AsyncClient, store: Storage, config: Config):
+    def __init__(self, client: AsyncClient, store: Storage, config: Config, chat: ChatFunctions):
         """
         Args:
             client: nio client used to interact with matrix.
@@ -34,6 +34,7 @@ class Callbacks:
         self.store = store
         self.config = config
         self.command_prefix = config.command_prefix
+        self.chat = chat
 
     def _check_if_message_from_thread(self, event: RoomMessageText):
         """Extracts the rel_type from a RoomMessageText object content
@@ -90,7 +91,7 @@ class Callbacks:
         # room.member_count <= 2 ... we assume a DM
         if room.member_count > 2 and not is_thread_reply:
             # Call the filter method on a message in a channel that not a thread discussion and does not contain the prefix (! REMOVE PREFIXES ENTIRELLY !)
-            command = Command(self.client, self.store, self.config, msg, room, event)
+            command = Command(self.client, self.store, self.config, msg, room, event, self.chat)
             await command.filter_channel()
             return
 
@@ -162,15 +163,14 @@ class Callbacks:
             return
 
         # Send a message acknowledging the reaction
-        reaction_sender_pill = make_pill(event.sender)
+        reaction_sender_pill = self.chat.make_pill(event.sender)
         reaction_content = (
             event.source.get("content", {}).get("m.relates_to", {}).get("key")
         )
         message = (
             f"{reaction_sender_pill} reacted to this event with `{reaction_content}`!"
         )
-        await send_text_to_room(
-            self.client,
+        await self.chat.send_text_to_room(
             room.room_id,
             message,
             reply_to_event_id=reacted_to_id,

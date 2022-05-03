@@ -20,6 +20,7 @@ from nio import (
 from my_project_name.callbacks import Callbacks
 from my_project_name.config import Config
 from my_project_name.storage import Storage
+from my_project_name.chat_functions import ChatFunctions
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,11 @@ async def main():
         client.access_token = config.user_token
         client.user_id = config.user_id
 
+    # Set up Chat Functions
+    chat = ChatFunctions(client, store)
+
     # Set up event callbacks
-    callbacks = Callbacks(client, store, config)
+    callbacks = Callbacks(client, store, config, chat)
     client.add_event_callback(callbacks.message, (RoomMessageText,))
     client.add_event_callback(
         callbacks.invite_event_filtered_callback, (InviteMemberEvent,)

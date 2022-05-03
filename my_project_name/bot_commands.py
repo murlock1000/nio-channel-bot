@@ -2,12 +2,7 @@ import logging
 
 from nio import AsyncClient, MatrixRoom, RoomMessageText, RoomRedactResponse
 
-from my_project_name.chat_functions import (
-    react_to_event,
-    send_msg,
-    send_text_to_room,
-    set_user_power,
-)
+from my_project_name.chat_functions import ChatFunctions
 from my_project_name.config import Config
 from my_project_name.storage import Storage
 
@@ -23,6 +18,7 @@ class Command:
         command: str,
         room: MatrixRoom,
         event: RoomMessageText,
+        chat: ChatFunctions
     ):
         """A command made by a user.
 
@@ -45,6 +41,7 @@ class Command:
         self.command = command
         self.room = room
         self.event = event
+        self.chat = chat
         self.args = self.command.split()[1:]
 
     async def process(self):
@@ -61,20 +58,20 @@ class Command:
     async def _echo(self):
         """Echo back the command's arguments"""
         response = " ".join(self.args)
-        await send_text_to_room(self.client, self.room.room_id, response)
+        await self.chat.send_text_to_room(self.room.room_id, response)
 
     async def _react(self):
         """Make the bot react to the command message"""
         # React with a start emoji
         reaction = "⭐"
-        await react_to_event(
-            self.client, self.room.room_id, self.event.event_id, reaction
+        await self.chat.react_to_event(
+            self.room.room_id, self.event.event_id, reaction
         )
 
         # React with some generic text
         reaction = "Some text"
-        await react_to_event(
-            self.client, self.room.room_id, self.event.event_id, reaction
+        await self.chat.react_to_event(
+            self.room.room_id, self.event.event_id, reaction
         )
 
     async def _show_help(self):
@@ -84,7 +81,7 @@ class Command:
                 "Hello, I am a bot made with matrix-nio! Use `help commands` to view "
                 "available commands."
             )
-            await send_text_to_room(self.client, self.room.room_id, text)
+            await self.chat.send_text_to_room(self.room.room_id, text)
             return
 
         topic = self.args[0]
@@ -94,11 +91,10 @@ class Command:
             text = "Available commands: ..."
         else:
             text = "Unknown help topic!"
-        await send_text_to_room(self.client, self.room.room_id, text)
+        await self.chat.send_text_to_room(self.room.room_id, text)
 
     async def _unknown_command(self):
-        await send_text_to_room(
-            self.client,
+        await self.chat.send_text_to_room(
             self.room.room_id,
             f"Unknown command '{self.command}'. Try the 'help' command for more information.",
         )
@@ -132,8 +128,7 @@ class Command:
                     self.store.update_or_create_fail(
                         self.event.sender, self.room.room_id
                     )
-                    new_room_id = await send_msg(
-                        self.client,
+                    new_room_id = await self.chat.send_msg(
                         self.event.sender,
                         ("""Your comment has been deleted {} times in {} discussion due to being improperly sent. Please reply in threads. \n
 How to enable threads: \n
@@ -145,8 +140,7 @@ How to enable threads: \n
                     if new_room_id is None:
                         logger.error("Unable to find previously created room id.")
                     else:
-                        await send_msg(
-                            self.client,
+                        await self.chat.send_msg(
                             self.event.sender,
                             "media/info_threads.gif",
                             is_image = True,
@@ -161,12 +155,11 @@ How to enable threads: \n
                     self.store.delete_fail(self.event.sender, self.room.room_id)
 
                     # Mute user
-                    await set_user_power(
-                        self.room.room_id, self.event.sender, self.client, -1
+                    await self.chat.set_user_power(
+                        self.room.room_id, self.event.sender, -1
                     )
                     # Inform user about the ban
-                    await send_msg(
-                        self.client,
+                    await self.chat.send_msg(
                         self.event.sender,
                         f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admin",
                         roomname = "WARNING!",
