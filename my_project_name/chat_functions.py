@@ -170,7 +170,7 @@ async def send_image_to_room(
             filesize=file_stat.st_size)
     if (isinstance(resp, UploadResponse)):
         logger.debug("File was uploaded successfully to server. "
-                     f"Response is: {resp}")
+                     f"Response is: {True}")
     else:
         logger.info(f"Failed to upload file to server. "
                     "Please retry. This could be temporary issue on "

@@ -135,20 +135,23 @@ class Command:
                     new_room_id = await send_msg(
                         self.client,
                         self.event.sender,
-                        f"Your comment has been deleted {fails+1} times in {self.room.room_id} discussion due to being improperly sent. Please reply in threads.",
-                        roomname ="WARNING!",
+                        f"Your comment has been deleted {fails+1} times in {self.room.name} discussion due to being improperly sent. Please reply in threads.",
+                        roomname = "WARNING!",
                     )
-                    await send_msg(
-                        self.client,
-                        self.event.sender,
-                        "media/info_threads.gif",
-                        True,
-                        room_id = new_room_id,
-                    )
+                    if new_room_id is None:
+                        logger.error("Unable to find previously created room id.")
+                    else:
+                        await send_msg(
+                            self.client,
+                            self.event.sender,
+                            "media/info_threads.gif",
+                            is_image = True,
+                            room_id = new_room_id,
+                        )
                     
                 else:
                     logger.info(
-                        f"{self.room.user_name(self.event.sender)} has been banned from room {self.room.room_id}"
+                        f"{self.room.user_name(self.event.sender)} has been banned from room {self.room.name}"
                     )
                     # Delete the user attempt entry
                     self.store.delete_fail(self.event.sender, self.room.room_id)
@@ -161,8 +164,8 @@ class Command:
                     await send_msg(
                         self.client,
                         self.event.sender,
-                        "WARNING!",
                         f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admin",
+                        roomname = "WARNING!",
                     )
             else:
                 logger.error(
