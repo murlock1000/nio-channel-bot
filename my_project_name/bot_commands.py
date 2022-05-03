@@ -135,7 +135,11 @@ class Command:
                     new_room_id = await send_msg(
                         self.client,
                         self.event.sender,
-                        f"Your comment has been deleted {fails+1} times in {self.room.name} discussion due to being improperly sent. Please reply in threads.",
+                        ("""Your comment has been deleted {} times in {} discussion due to being improperly sent. Please reply in threads. \n
+How to enable threads: \n
+1. Hover on a message and click 'Reply in Thread' button. \n
+2. Press 'Join the beta' button. \n
+3. Reply to a message using the 'Reply in Thread' button.""").format(fails+1, self.room.name),
                         roomname = "WARNING!",
                     )
                     if new_room_id is None:

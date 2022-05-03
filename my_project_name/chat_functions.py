@@ -94,6 +94,7 @@ async def send_image_to_room(
     client: AsyncClient,
     room_id: str,
     file: str,
+    content_uri: str = None,
 ) -> Union[RoomSendResponse, ErrorResponse]:
     """Process file.
     Upload file to server and then send link to rooms.
@@ -157,28 +158,30 @@ async def send_image_to_room(
     #                 "This file is being droppend and NOT sent.")
     #    return
 
-    # first do an upload of file
+    # first do an upload of file if it hasn't already been uploaded
     # see https://matrix-nio.readthedocs.io/en/latest/nio.html#nio.AsyncClient.upload # noqa
     # then send URI of upload to room
-
-    file_stat = await aiofiles.os.stat(file)
-    async with aiofiles.open(file, "r+b") as f:
-        resp, maybe_keys = await client.upload(
-            f,
-            content_type=mime_type,  # application/pdf
-            filename=os.path.basename(file),
-            filesize=file_stat.st_size)
-    if (isinstance(resp, UploadResponse)):
-        logger.debug("File was uploaded successfully to server. "
-                     f"Response is: {True}")
-    else:
-        logger.info(f"Failed to upload file to server. "
-                    "Please retry. This could be temporary issue on "
-                    "your server. "
-                    "Sorry.")
-        logger.info(f"file=\"{file}\"; mime_type=\"{mime_type}\"; "
-                    f"filessize=\"{file_stat.st_size}\""
-                    f"Failed to upload: {resp}")
+    if content_uri is None:
+        file_stat = await aiofiles.os.stat(file)
+        async with aiofiles.open(file, "r+b") as f:
+            resp, maybe_keys = await client.upload(
+                f,
+                content_type=mime_type,  # application/pdf
+                filename=os.path.basename(file),
+                filesize=file_stat.st_size)
+        if (isinstance(resp, UploadResponse)):
+            logger.debug("File was uploaded successfully to server. "
+                        f"Response is: {resp.content_uri}")
+            content_uri = resp.content_uri
+        else:
+            logger.info(f"Failed to upload file to server. "
+                        "Please retry. This could be temporary issue on "
+                        "your server. "
+                        "Sorry.")
+            logger.info(f"file=\"{file}\"; mime_type=\"{mime_type}\"; "
+                        f"filessize=\"{file_stat.st_size}\""
+                        f"Failed to upload: {resp}")
+            return
 
     content = {
         "body": os.path.basename(file),  # descriptive title
@@ -187,7 +190,7 @@ async def send_image_to_room(
             "mimetype": mime_type,
         },
         "msgtype": "m.image",
-        "url": resp.content_uri,
+        "url": content_uri,
     }
 
     try:
