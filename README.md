@@ -75,7 +75,7 @@ Copy sample config file to new 'config.yaml' file
 `cp sample.config.yaml config.yaml`
 
 # config.yaml file edits:
--
+
 user_id: "@test:synapse.local"
 user_password: "pass"
 
@@ -87,7 +87,9 @@ device_name: test_matrix_bot
 
 # (Optional) change logging levels to debug
 level: DEBUG
--
+
+# End of file edit
+
 
 Run the bot:
 `my-project-name`
