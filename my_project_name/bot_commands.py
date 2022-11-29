@@ -137,6 +137,7 @@ How to enable threads: \n
 3. Reply to a message using the 'Reply in Thread' button.""").format(fails+1, self.room.name),
                         roomname = "WARNING!",
                     )
+                    new_room_id = new_room_id[0]
                     if new_room_id is None:
                         logger.error("Unable to find previously created room id.")
                     else:
@@ -155,15 +156,28 @@ How to enable threads: \n
                     self.store.delete_fail(self.event.sender, self.room.room_id)
 
                     # Mute user
-                    await self.chat.set_user_power(
+                    resp = await self.chat.set_user_power(
                         self.room.room_id, self.event.sender, -1
                     )
+                    logger.info(
+                        f"Power level response: {resp}"
+                    )
+                    #Find admin users in room
+                    admins = []
+                    for user in self.room.users:
+                        powerlevel = self.room.power_levels.get_user_level(user)
+                        if user != self.client.user and powerlevel == 100:
+                            admins.append(user)
+                    admin_string = ", ".join(admins)
+                    logger.debug(f"Room admins: {admin_string}")
+
                     # Inform user about the ban
-                    await self.chat.send_msg(
+                    res = await self.chat.send_msg(
                         self.event.sender,
-                        f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admin",
+                        f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admins: {admin_string}",
                         roomname = "WARNING!",
                     )
+                    await res[1]
             else:
                 logger.error(
                     f"Bot does not have sufficient power to redact others in group: {self.room.name}"

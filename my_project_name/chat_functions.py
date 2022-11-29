@@ -335,21 +335,22 @@ class ChatFunctions:
                 logger.error(f"Unable to create room when trying to message {mxid}")
                 return None
             room_id = msg_room.room_id
-
+        logger.debug(f"Found room id: {room_id}")
         """
         : A concurrency problem: creating a new room does not sync the local data about rooms.
         : In order to perform the sync, we must exit the callback.
         : Solution: use an asyncio task, that performs the sync.wait() and sends the message afterwards concurently with sync_forever().
         """
+        task = None
         if is_image:
-            asyncio.get_event_loop().create_task(
+            task = asyncio.get_event_loop().create_task(
                 self._send_task(room_id, self.send_image_to_room, content)
             )
         else:
-            asyncio.get_event_loop().create_task(
+            task = asyncio.get_event_loop().create_task(
                 self._send_task(room_id, self.send_text_to_room, content)
             )
-        return room_id
+        return [room_id, task]
 
 
     async def find_or_create_private_msg(
@@ -389,7 +390,7 @@ class ChatFunctions:
         func = getattr(self.client, method)
         response = await func(*args, **kwargs)
         if getattr(response, "status_code", None) == "M_LIMIT_EXCEEDED":
-            return self.with_ratelimit(method, *args, **kwargs)
+            return await self.with_ratelimit(method, *args, **kwargs)
         return response
 
 
