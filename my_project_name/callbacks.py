@@ -194,15 +194,15 @@ class Callbacks:
             f"commands a second time)."
         )
 
-        red_x_and_lock_emoji = "❌ 🔐"
+        #red_x_and_lock_emoji = "❌ 🔐"
 
         # React to the undecryptable event with some emoji
-        await react_to_event(
-            self.client,
-            room.room_id,
-            event.event_id,
-            red_x_and_lock_emoji,
-        )
+        #await react_to_event(
+        #    self.client,
+        #    room.room_id,
+        #    event.event_id,
+        #    red_x_and_lock_emoji,
+        #)
 
     async def joined(self, room: MatrixRoom, event: RoomMemberEvent) -> None:
         """Callback for when a user invites/leaves/joins a room
