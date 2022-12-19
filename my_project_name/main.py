@@ -111,6 +111,8 @@ async def main():
                 # Login succeeded!
 
             logger.info(f"Logged in as {config.user_id}")
+            # Perform first time sync
+            # await client.synced.wait()
             await client.sync_forever(timeout=30000, full_state=True)
 
         except (ClientConnectionError, ServerDisconnectedError):

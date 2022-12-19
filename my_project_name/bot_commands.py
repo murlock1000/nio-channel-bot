@@ -1,8 +1,9 @@
+import asyncio
 import logging
 
-from nio import AsyncClient, MatrixRoom, RoomMessageText, RoomRedactResponse
+from nio import AsyncClient, MatrixRoom, RoomMessageText, RoomRedactResponse, RoomRedactError, RoomCreateError, RoomPutStateResponse
 
-from my_project_name.chat_functions import ChatFunctions
+from my_project_name.chat_functions import ChatFunctions, with_ratelimit
 from my_project_name.config import Config
 from my_project_name.storage import Storage
 
@@ -98,6 +99,15 @@ class Command:
             self.room.room_id,
             f"Unknown command '{self.command}'. Try the 'help' command for more information.",
         )
+    @with_ratelimit
+    async def send_room_redact(self):
+        return await self.client.room_redact(
+                self.room.room_id,
+                self.event.event_id,
+                "You are not a moderator of this channel.",
+            )
+
+    #
 
     async def filter_channel(self):
         # First check the power level of the sender. 0 - default, 50 - moderator, 100 - admin, others - custom.
@@ -108,50 +118,20 @@ class Command:
             if self.room.power_levels.can_user_redact(self.client.user_id):
 
                 # Redact the message
-                tries = 0
-                redact_response = None
-                while type(redact_response) is not RoomRedactResponse and tries < 3:
-                    redact_response = await self.client.room_redact(
-                        self.room.room_id,
-                        self.event.event_id,
-                        "You are not a moderator of this channel.",
-                    )
-                    tries += 1
-                if type(redact_response) is not RoomRedactResponse:
-                    logger.error(f"Unable to redact message: {redact_response}")
+                redact_response = await self.send_room_redact()
+                if isinstance(redact_response, RoomRedactError):
+                    logger.error(f"Failed to redact message in room {self.room.room_id} with id {self.event.event_id} with error: {redact_response.status_code}")
+                    return
 
                 # Get user attempts from database
                 fails = self.store.get_fail(self.event.sender, self.room.room_id)
 
-                # Ban or increment attempts
+                # Ban if over 3 fails or issue warning:
                 if fails < 3:
                     self.store.update_or_create_fail(
                         self.event.sender, self.room.room_id
                     )
-                    new_room_id = await self.chat.send_msg(
-                        self.event.sender,
-                        ("""Your comment has been deleted {} times in {} discussion due to being improperly sent. Please reply in threads. \n
-How to enable threads: \n
-1. Hover on a message and click 'Reply in Thread' button. \n
-2. Press 'Join the beta' button. \n
-3. Reply to a message using the 'Reply in Thread' button.""").format(fails+1, self.room.name),
-                        roomname = "WARNING!",
-                    )
-                    new_room_id = new_room_id[0]
-                    if new_room_id is None:
-                        logger.error("Unable to find previously created room id.")
-                    else:
-                        await self.chat.send_msg(
-                            self.event.sender,
-                            "media/info_threads.gif",
-                            is_image = True,
-                            room_id = new_room_id,
-                        )
-                    
                 else:
-                    logger.info(
-                        f"{self.room.user_name(self.event.sender)} has been banned from room {self.room.name}"
-                    )
                     # Delete the user attempt entry
                     self.store.delete_fail(self.event.sender, self.room.room_id)
 
@@ -159,9 +139,37 @@ How to enable threads: \n
                     resp = await self.chat.set_user_power(
                         self.room.room_id, self.event.sender, -1
                     )
-                    logger.info(
-                        f"Power level response: {resp}"
+                    if isinstance(resp, RoomPutStateResponse):
+                        logger.info(
+                            f"{self.room.user_name(self.event.sender)} has been banned from room {self.room.name}"
+                        )
+                    else:
+                        logger.error(f"Error: Power level response: {resp}")
+                        return
+
+                # Add the room id get/create task to be performed after next sync
+                notification_room_id_future = await self.chat.roomManager.get_private_room_id(self.event.sender)
+                if isinstance(notification_room_id_future, RoomCreateError):
+                    return
+
+                # Inform user about ban/issue warning
+                if fails < 3:
+                    print("Sending warning message")
+                    await self.chat.roomManager.send_msg_on_creation(
+                        ("""Your comment has been deleted {} times in {} discussion due to being improperly sent. Please reply in threads. \n
+How to enable threads: \n
+1. Hover on a message and click 'Reply in Thread' button. \n
+2. Press 'Join the beta' button. \n
+3. Reply to a message using the 'Reply in Thread' button.""").format(fails+1, self.room.name),
+                        notification_room_id_future,
                     )
+
+                    await self.chat.roomManager.send_msg_on_creation(
+                        "media/info_threads.gif",
+                        notification_room_id_future,
+                        is_image = True,
+                    )
+                else:
                     #Find admin users in room
                     admins = []
                     for user in self.room.users:
@@ -172,12 +180,10 @@ How to enable threads: \n
                     logger.debug(f"Room admins: {admin_string}")
 
                     # Inform user about the ban
-                    res = await self.chat.send_msg(
-                        self.event.sender,
+                    await self.chat.roomManager.send_msg_on_creation(
                         f"# You have made >3 improper comments in {self.room.name} discussion. Please seek help from the group admins: {admin_string}",
-                        roomname = "WARNING!",
+                        notification_room_id_future
                     )
-                    await res[1]
             else:
                 logger.error(
                     f"Bot does not have sufficient power to redact others in group: {self.room.name}"

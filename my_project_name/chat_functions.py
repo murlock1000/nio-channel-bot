@@ -1,6 +1,8 @@
 import logging
 import asyncio
 from typing import Optional, Union
+from collections.abc import Coroutine
+from asyncio import AbstractEventLoop
 from my_project_name.storage import Storage
 from aiohttp import ClientResponse
 from markdown import markdown
@@ -34,6 +36,27 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
+async def retry_after(delay_ms):
+    deadzone = 50  # 50ms additional wait time.
+    delay_s = (delay_ms + deadzone) / 1000
+
+    await asyncio.sleep(delay_s)
+
+
+def with_ratelimit(func):
+    async def wrapper(*args, **kwargs):
+        while True:
+            response = await func(*args, **kwargs)
+            if isinstance(response, ErrorResponse):
+                if response.status_code == "M_LIMIT_EXCEEDED":
+                    await retry_after(response.retry_after_ms)
+                else:
+                    return response
+            else:
+                return response
+
+    return wrapper
+
 class ChatFunctions:
 
     def __init__(
@@ -50,6 +73,7 @@ class ChatFunctions:
         """
         self.client = client
         self.store = store
+        self.roomManager = RoomManager(self, client, store)
 
     async def send_text_to_room(
         self,
@@ -145,10 +169,10 @@ class ChatFunctions:
         }
         """
         if not os.path.isfile(file):
-            logger.debug(f"File {file} is not a file. Doesn't exist or "
-                         "is a directory."
-                         "This file is being droppend and NOT sent.")
-            return
+            error_msg = f"File {file} is not a file. Doesn't exist or is a directory. This file is being droppend and NOT sent."
+
+            logger.debug(error_msg)
+            return ErrorResponse(error_msg)
 
         # # restrict to "txt", "pdf", "mp3", "ogg", "wav", ...
         # if not re.match("^.pdf$|^.txt$|^.doc$|^.xls$|^.mobi$|^.mp3$",
@@ -193,14 +217,15 @@ class ChatFunctions:
                 logger.debug(f"Storing file {file} uri {content_uri} to the DB.")
                 self.store.set_uri(file, content_uri)
             else:
-                logger.info(f"Failed to upload file to server. "
-                            "Please retry. This could be temporary issue on "
-                            "your server. "
-                            "Sorry.")
+                error_msg = f"Failed to upload file to server. "\
+                            "Please retry. This could be temporary issue on "\
+                            "your server. "\
+                            "Sorry."
+                logger.info(error_msg)
                 logger.info(f"file=\"{file}\"; mime_type=\"{mime_type}\"; "
                             f"filessize=\"{file_stat.st_size}\""
                             f"Failed to upload: {resp}")
-                return
+                return resp
         else:
             logger.debug(f"Found URI of {file} in the DB, using: {content_uri}")
 
@@ -315,56 +340,48 @@ class ChatFunctions:
         : Wait for new sync, until we receive the new room information
         : Send the message to the room
         """
-        while self.client.rooms.get(room_id) is None:
-            await self.client.synced.wait()
-        await send_method(room_id, content)
+        condition = asyncio.Condition()
 
+        print("waiting for condition")
+        #async with condition:
+        #    await condition.wait_for(lambda:(self.client.rooms.get(room_id) is not None))
+       # while self.client.rooms.get(room_id) is None:
+        #    await self.client.synced.wait()
 
-    async def send_msg(self, mxid: str, content: str, is_image: bool = False, room_id: str = None, roomname: str = ""):
+        print("trying to send message")
+        print(f"room id: {room_id}")
+        resp = await with_ratelimit(send_method)(room_id, content)
+        if isinstance(resp, ErrorResponse):
+            logger.error(
+                f"Failed to send message to room {room_id} with error: {resp.status_code}")
+        return resp
+
+    async def send_msg(self, content: str, room_id: str, is_image: bool = False):
         """
         :Code from - https://github.com/vranki/hemppa/blob/dcd69da85f10a60a8eb51670009e7d6829639a2a/bot.py
-        :param mxid: A Matrix user id to send the message to
-        :param roomname: A Matrix room id to send the message to
-        :param message: Text to be sent as message
+        :param content: Text/Image to be sent as message
+        :param room_id: A Matrix room id to send the message to
+        :param is_image: Boolean if the content is of image type
         :return bool: Returns room id upon sending the message
         """
-        # Sends private message to user. Returns true on success.
-        if room_id is None:
-            msg_room = await self.find_or_create_private_msg(mxid, roomname)
-            if not msg_room or (type(msg_room) is RoomCreateError):
-                logger.error(f"Unable to create room when trying to message {mxid}")
-                return None
-            room_id = msg_room.room_id
-        logger.debug(f"Found room id: {room_id}")
         """
         : A concurrency problem: creating a new room does not sync the local data about rooms.
         : In order to perform the sync, we must exit the callback.
         : Solution: use an asyncio task, that performs the sync.wait() and sends the message afterwards concurently with sync_forever().
         """
         task = None
-        if is_image:
-            task = asyncio.get_event_loop().create_task(
-                self._send_task(room_id, self.send_image_to_room, content)
-            )
-        else:
-            task = asyncio.get_event_loop().create_task(
-                self._send_task(room_id, self.send_text_to_room, content)
-            )
-        return [room_id, task]
+        method = self.send_image_to_room if is_image else self.send_text_to_room
+        print("sending task")
+        #task = asyncio.get_event_loop().create_task(
+        return await self._send_task(room_id, method, content)
+        #    )
+        #return [room_id, task]
 
-
-    async def find_or_create_private_msg(
-        self, mxid: str, roomname: str
-    ) -> Union[RoomCreateResponse, RoomCreateError]:
-        """
-        :param mxid: user id to create a DM for
-        :param roomname: The DM room name
-        :return: the Room Response from room_create()
-        """
+    def find_private_msg(self, mxid:str)-> MatrixRoom:
         # Find if we already have a common room with user:
         msg_room = None
-        for croomid in self.client.rooms:
-            roomobj = self.client.rooms[croomid]
+        for roomid in self.client.rooms:
+            roomobj = self.client.rooms[roomid]
             if roomobj.member_count == 2:
                 for user in roomobj.users:
                     if user == mxid:
@@ -372,28 +389,39 @@ class ChatFunctions:
                 for user in roomobj.invited_users:
                     if user == mxid:
                         msg_room = roomobj
-        # Nope, let's create one
-        if not msg_room:
-            msg_room = await self.client.room_create(
+        if msg_room:
+            logger.debug(f"Found existing DM for user {mxid} with roomID: {msg_room.room_id}")
+        return msg_room
+    async def create_private_msg(
+        self, mxid: str, roomname: str
+    ) -> Union[RoomCreateResponse, RoomCreateError]:
+
+        """
+        :param mxid: user id to create a DM for
+        :param roomname: The DM room name
+        :return: the Room Response from room_create()
+        """
+       # print("WAITING FOR SYNC")
+        #await self.client.synced.wait()
+       # print("SYNC RECEIVED")
+        resp = await with_ratelimit(self.client.room_create)(
                 visibility=RoomVisibility.private,
                 name=roomname,
                 is_direct=True,
                 preset=RoomPreset.private_chat,
                 invite={mxid},
             )
-            logger.debug(f"Created new room with id: {msg_room.room_id}")
-        return msg_room
+        if isinstance(resp, RoomCreateResponse):
+            logger.debug(f"Created a new DM for user {mxid} with roomID: {resp.room_id}")
+        elif isinstance(resp, RoomCreateError):
+            logger.error(f"Failed to create a new DM for user {mxid} with error: {resp.status_code}")
+        return resp
+
 
 
     # Code for changing user power was taken from https://github.com/elokapina/bubo/commit/d2a69117e52bb15090f993f79eeed8dbc3b3e4ae
-    async def with_ratelimit(self, method: str, *args, **kwargs):
-        func = getattr(self.client, method)
-        response = await func(*args, **kwargs)
-        if getattr(response, "status_code", None) == "M_LIMIT_EXCEEDED":
-            return await self.with_ratelimit(method, *args, **kwargs)
-        return response
 
-
+    @with_ratelimit
     async def set_user_power(
         self,
         room_id: str,
@@ -410,7 +438,7 @@ class ChatFunctions:
         Set user power in a room.
         """
         logger.debug(f"Setting user power: {room_id}, user: {user_id}, level: {power}")
-        state_response = await self.client.room_get_state_event(room_id, "m.room.power_levels")
+        state_response = await with_ratelimit(self.client.room_get_state_event)(room_id, "m.room.power_levels")
         if isinstance(state_response, RoomGetStateEventError):
             logger.error(f"Failed to fetch room {room_id} state: {state_response.message}")
             return state_response
@@ -429,10 +457,91 @@ class ChatFunctions:
             )
             return status_code
         state_response.content["users"][user_id] = power
-        response = await self.with_ratelimit(
-            "room_put_state",
+
+        response = await with_ratelimit(self.client.room_put_state)(
             room_id=room_id,
             event_type="m.room.power_levels",
             content=state_response.content,
         )
         return response
+
+
+class RoomFuture:
+    def __init__(self, client:AsyncClient, loop:AbstractEventLoop, mxid: str, room_id: str):
+
+        self.client = client
+        self.loop = loop
+        self.mxid = mxid
+        self.room_id = room_id
+
+        self.waited_by = []
+        self.isCreated = False
+        self.isCreatedCondition = asyncio.Condition()
+
+        if room_id not in client.rooms.keys():
+            self.start_checking_state()
+        else:
+            self.isCreated = True
+    def start_checking_state(self):
+        self.loop.create_task(self.check_state())
+    async def check_state(self):
+        while self.room_id not in self.client.rooms.keys():
+            self.client.synced.wait()
+        self.isCreated = True
+        self.isCreatedCondition.notify_all()
+class RoomManager:
+    def __init__(
+            self,
+            chat: ChatFunctions,
+            client: AsyncClient,
+            store: Storage
+    ):
+        """ Room manager class - thread safe data structure for room list.
+
+        Args:
+            client: The client to communicate to matrix with.
+
+            store: Bot storage.
+        """
+        self.user_room_futures = {} # Queue for holding DM rooms that have been created and are waiting on new sync.
+        self.chat = chat
+        self.client = client
+        self.store = store
+
+    def append_task(self, task: Coroutine, waiting_for: Coroutine):
+        if waiting_for in self.sendTasks.keys():
+            self.sendTasks[waiting_for].append(task)
+        else:
+            self.sendTasks[waiting_for] = [task]
+
+    async def get_private_room_id(self, mxid: str) -> str:
+        if mxid in self.user_room_futures.keys():
+            return self.user_room_futures[mxid]
+
+        # First check if we already have info about such a room
+        existing_room = self.chat.find_private_msg(mxid)
+        loop = asyncio.get_event_loop()
+        if existing_room is not None:
+            room_future = RoomFuture(self.client, loop, mxid, existing_room.room_id)
+            self.user_room_futures[mxid] = room_future
+            return room_future
+
+        # Request one to be created and add the task to the queue.
+        response = await self.chat.create_private_msg(mxid, "WARNING!")
+        if isinstance(response, RoomCreateResponse):
+            room_future = RoomFuture(self.client, loop, mxid, response.room_id)
+            self.user_room_futures[mxid] = room_future
+            return room_future
+        else:
+            return response
+
+    async def send_msg_on_creation(self, content: str, room_id_future: RoomFuture, is_image: bool = False):
+        async def on_creation():
+            async with room_id_future.isCreatedCondition.wait():
+                return await self.chat.send_msg(content, room_id_future.room_id, is_image)
+
+        if room_id_future.isCreated:
+            return await self.chat.send_msg(content, room_id_future.room_id, is_image)
+        else:
+            loop = asyncio.get_event_loop()
+            loop.create_task(on_creation())
