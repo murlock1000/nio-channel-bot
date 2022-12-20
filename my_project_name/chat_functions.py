@@ -46,6 +46,7 @@ async def retry_after(delay_ms):
 def with_ratelimit(func):
     async def wrapper(*args, **kwargs):
         while True:
+            logger.debug(f"Executing function: {func.__name__}")
             response = await func(*args, **kwargs)
             if isinstance(response, ErrorResponse):
                 if response.status_code == "M_LIMIT_EXCEEDED":
@@ -340,16 +341,6 @@ class ChatFunctions:
         : Wait for new sync, until we receive the new room information
         : Send the message to the room
         """
-        condition = asyncio.Condition()
-
-        print("waiting for condition")
-        #async with condition:
-        #    await condition.wait_for(lambda:(self.client.rooms.get(room_id) is not None))
-       # while self.client.rooms.get(room_id) is None:
-        #    await self.client.synced.wait()
-
-        print("trying to send message")
-        print(f"room id: {room_id}")
         resp = await with_ratelimit(send_method)(room_id, content)
         if isinstance(resp, ErrorResponse):
             logger.error(
@@ -376,19 +367,26 @@ class ChatFunctions:
         return await self._send_task(room_id, method, content)
         #    )
         #return [room_id, task]
+    @staticmethod
+    def is_room_private_msg(room:MatrixRoom, mxid:str) -> bool:
+        if room.member_count == 2:
+            for user in room.users:
+                if user == mxid:
+                    return True
+            for user in room.invited_users:
+                if user == mxid:
+                    return True
+        return False
 
     def find_private_msg(self, mxid:str)-> MatrixRoom:
         # Find if we already have a common room with user:
         msg_room = None
         for roomid in self.client.rooms:
-            roomobj = self.client.rooms[roomid]
-            if roomobj.member_count == 2:
-                for user in roomobj.users:
-                    if user == mxid:
-                        msg_room = roomobj
-                for user in roomobj.invited_users:
-                    if user == mxid:
-                        msg_room = roomobj
+            room = self.client.rooms[roomid]
+            if ChatFunctions.is_room_private_msg(room, mxid):
+                msg_room = room
+                break
+
         if msg_room:
             logger.debug(f"Found existing DM for user {mxid} with roomID: {msg_room.room_id}")
         return msg_room
@@ -486,9 +484,11 @@ class RoomFuture:
         self.loop.create_task(self.check_state())
     async def check_state(self):
         while self.room_id not in self.client.rooms.keys():
-            self.client.synced.wait()
+            await self.client.synced.wait()
         self.isCreated = True
-        self.isCreatedCondition.notify_all()
+
+        async with self.isCreatedCondition:
+            self.isCreatedCondition.notify_all()
 class RoomManager:
     def __init__(
             self,
@@ -514,13 +514,26 @@ class RoomManager:
         else:
             self.sendTasks[waiting_for] = [task]
 
-    async def get_private_room_id(self, mxid: str) -> str:
-        if mxid in self.user_room_futures.keys():
-            return self.user_room_futures[mxid]
+    def room_valid(self, room_future: RoomFuture):
+        room = self.client.rooms[room_future.room_id]
+        mxid = room_future.mxid
+        return ChatFunctions.is_room_private_msg(room, mxid)
 
-        # First check if we already have info about such a room
+    async def get_private_room_id(self, mxid: str) -> str:
+        # First check if we have a processed room for the user
+        if mxid in self.user_room_futures.keys():
+            room_future = self.user_room_futures[mxid]
+            # Check if the room is still a DM (user hasn't left)
+            if self.room_valid(room_future):
+                return room_future
+            else:
+                self.user_room_futures.pop(mxid)
+
+        # Check if client state contains info about a DM room
         existing_room = self.chat.find_private_msg(mxid)
         loop = asyncio.get_event_loop()
+
+        # Create a new room future from the existing room data.
         if existing_room is not None:
             room_future = RoomFuture(self.client, loop, mxid, existing_room.room_id)
             self.user_room_futures[mxid] = room_future
@@ -537,7 +550,8 @@ class RoomManager:
 
     async def send_msg_on_creation(self, content: str, room_id_future: RoomFuture, is_image: bool = False):
         async def on_creation():
-            async with room_id_future.isCreatedCondition.wait():
+            async with room_id_future.isCreatedCondition:
+                await room_id_future.isCreatedCondition.wait()
                 return await self.chat.send_msg(content, room_id_future.room_id, is_image)
 
         if room_id_future.isCreated:
