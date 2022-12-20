@@ -4,11 +4,9 @@ Created using the matrix-nio python api for matrix communications
 Base template used: nio-template
 
 # Functions
-This bot is designed to redact messages (remove them) if:
-the user that posted it is not an admin/moderator of the room and his message is not a thread reply.
-I.E. if it's a regular message/regular reply - gets deleted. Messages made in threads are allowed.
-When a user gets his message deleted - the bot creates/uses an existing DM room and informs the user about his attempt. Also increases the attempt count in the database.
-After 3 attempts (3 message deletions) - the bot mutes (changes power level to -1) the user and resets the attempt count.
+The bot will delete a message if it is not a thread reply and the user is not an admin/moderator of the room. 
+If a message is deleted, the bot will inform the user through a DM room and increase their attempt count in the database.
+If a user's message is deleted three times, the bot will mute the user and reset their attempt count.
 
 
 # Sources
