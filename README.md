@@ -1,53 +1,47 @@
-# Matrix Bot for replicating a Telegram channel.
-Used Python 3.8.10
-Created using the matrix-nio python api for matrix communications
-Base template used: nio-template
+# Nio-channel-bot for replicating a Telegram channel.
+[![Built with nio-template](https://img.shields.io/badge/built%20with-nio--template-brightgreen)](https://github.com/anoadragon453/nio-template)
 
-# Functions
-The bot will delete a message if it is not a thread reply and the user is not an admin/moderator of the room. 
-If a message is deleted, the bot will inform the user through a DM room and increase their attempt count in the database.
-If a user's message is deleted three times, the bot will mute the user and reset their attempt count.
+Matrix bot that replicates the functionality of a Telegram channel.
 
+Features:
 
-# Sources
-bot template:       https://github.com/anoadragon453/nio-template
-matrix-nio library: https://github.com/poljar/matrix-nio
+* Messages to the room the bot is in are filtered by criteria:
+  * If the sender has power level < 50
+  * The message is not a thread reply.
+* Warning message is sent to a DM room.
+* If an existing DM room is not found - a new one is created.
+* Messages to a newly created DM room are buffered, until client state receives the room data.
+* After 3 attempts the user is muted.
+* User is informed about the ban and is provided with the usernames of the room admins.
 
 # Setup
 
-Read the SETUP.md of the bot template repo
-Setup for native mode (Could be setup in docker, did not try)
-Installing libolm: apt install libolm-dev
-Use default SQLite storage backend (postgres optional, may be used in future).
 
-Create a bot user:
-We will be using the @test.synapse.local user with pass: pass
+* Follow the setup guide using native mode (Docker instance not set up yet): [nio-template-setup](https://github.com/anoadragon453/nio-template/blob/master/SETUP.md)
+* Install libolm: `apt install libolm-dev`
+* Create a bot user.
 
-
-# Changing Bot user message throttling settings
+## Disable message throttling
 In order to allow the bot to respond to messages quickly,
 we must overwrite the user message throttling settings,
-We will be using the synapse Admin API to make a POST request to the server
+We will be using the [Synapse Admin API](https://matrix-org.github.io/synapse/latest/usage/administration/admin_api/) to make a POST request to the server
 
-Source
-https://matrix-org.github.io/synapse/latest/usage/administration/admin_api/
-
-## Getting the admin api key
+### Getting the admin api key
 1. Create a matrix user with admin privileges
 2. Log in with the user
 3. Go to 'All settings' -> 'Help & About' -> 'Advanced' -> 'Access Token' (at the bottom)
 4. Copy the Access Token.
 # This token is only valid for the duration you are logged in with the user
  
-## Making the API call
+### Making the API call
 The call for overwriting the @test:synapse.local throttle settings is:
 `curl --header "Authorization: Bearer ENTERADMINAPIKEYHERE" -H "Content-Type: application/json" --request POST -k http://localhost:8008/_synapse/admin/v1/users/@test:synapse.local/override_ratelimit`
 Should return result of `{"messages_per_second":0, "burst_count":0}`
 
 
-# Step by step instructions
+## Step by step instructions
 
-## Installing Prerequisites
+### Installing Prerequisites
 
 Install libolm:
 `sudo apt install libolm-dev`
@@ -67,28 +61,23 @@ Install python dependencies:
 `pip install -e ".[postgres]"`
 
 
-# Config file
+## Config file
 
 Copy sample config file to new 'config.yaml' file
 `cp sample.config.yaml config.yaml`
 
-# config.yaml file edits:
+## config.yaml file edits:
 
 user_id: "@test:synapse.local"
 user_password: "pass"
 
 homeserver_url: http://localhost:8080
 
-# Haven't figured out this part yet
-device_id: PUTRANDOMCHARSHERE
-device_name: test_matrix_bot
+## Create a unique device for the bot
+device_id: UNIQUEDEVICEID
+device_name: test_matrix_bot_xxx
 
-# (Optional) change logging levels to debug
-level: DEBUG
-
-# End of file edit
-
-
+## End of file edit
 Run the bot:
 `my-project-name`
 
