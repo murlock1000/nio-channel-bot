@@ -515,6 +515,9 @@ class RoomManager:
             self.sendTasks[waiting_for] = [task]
 
     def room_valid(self, room_future: RoomFuture):
+        # If we are still waiting for the room data - treat it as valid
+        if not room_future.isCreated:
+            return True
         room = self.client.rooms[room_future.room_id]
         mxid = room_future.mxid
         return ChatFunctions.is_room_private_msg(room, mxid)

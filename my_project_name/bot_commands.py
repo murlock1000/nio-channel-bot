@@ -123,15 +123,21 @@ class Command:
                     logger.error(f"Failed to redact message in room {self.room.room_id} with id {self.event.event_id} with error: {redact_response.status_code}")
                     return
 
-                # Get user attempts from database
-                fails = self.store.get_fail(self.event.sender, self.room.room_id)
+                fails = None
+                is_banned = False
+                if self.room.power_levels.get_user_level(self.event.sender) == -1:
+                    is_banned = True
+                    fails = 3
+                else:
+                    # Get user attempts from database
+                    fails = self.store.get_fail(self.event.sender, self.room.room_id)
 
                 # Ban if over 3 fails or issue warning:
                 if fails < 3:
                     self.store.update_or_create_fail(
                         self.event.sender, self.room.room_id
                     )
-                else:
+                elif not is_banned:
                     # Delete the user attempt entry
                     self.store.delete_fail(self.event.sender, self.room.room_id)
 
