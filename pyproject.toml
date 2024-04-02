@@ -19,7 +19,7 @@ python-magic = "^0.4"
 isort = "5.0.4"
 flake8 = "3.8.3"
 flake8-comprehensions = "3.2.3"
-black = "19.10b0"
+black = "^24.3"
 
 [build-system]
 requires = ["poetry-core>=1.9.0"]
