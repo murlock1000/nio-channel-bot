@@ -42,7 +42,8 @@ RUN apk add \
     yaml-dev \
     python3-dev \
     postgresql-dev \
-    musl-dev
+    musl-dev \
+    libmagic
 
 # Build libolm
 #
@@ -100,7 +101,8 @@ RUN apk add --no-cache \
     libstdc++ 
 
 RUN apk add --no-cache \
-    libpq
+    libpq \
+    libmagic
 
 # Copy app files
 COPY *.py *.md /app/

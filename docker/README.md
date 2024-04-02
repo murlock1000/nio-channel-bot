@@ -67,7 +67,7 @@ First, create a volume for the data directory created in the above section:
 docker volume create \
   --opt type=none \
   --opt o=bind \
-  --opt device="/path/to/data/dir" data_volume
+  --opt device="/path/to/data/dir" nio_channel_bot_data_volume
 ```
 
 Optional: If you want to use the postgres container defined in
