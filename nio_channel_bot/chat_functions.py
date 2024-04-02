@@ -3,7 +3,7 @@ import asyncio
 from typing import Optional, Union
 from collections.abc import Coroutine
 from asyncio import AbstractEventLoop
-from my_project_name.storage import Storage
+from nio_channel_bot.storage import Storage
 from aiohttp import ClientResponse
 from markdown import markdown
 from nio import (

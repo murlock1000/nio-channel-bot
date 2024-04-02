@@ -3,9 +3,9 @@ import logging
 
 from nio import AsyncClient, MatrixRoom, RoomMessageText, RoomRedactResponse, RoomRedactError, RoomCreateError, RoomPutStateResponse
 
-from my_project_name.chat_functions import ChatFunctions, with_ratelimit
-from my_project_name.config import Config
-from my_project_name.storage import Storage
+from nio_channel_bot.chat_functions import ChatFunctions, with_ratelimit
+from nio_channel_bot.config import Config
+from nio_channel_bot.storage import Storage
 
 logger = logging.getLogger(__name__)
 

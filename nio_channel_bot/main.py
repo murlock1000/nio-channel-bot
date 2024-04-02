@@ -17,10 +17,10 @@ from nio import (
     RoomMemberEvent,
 )
 
-from my_project_name.callbacks import Callbacks
-from my_project_name.config import Config
-from my_project_name.storage import Storage
-from my_project_name.chat_functions import ChatFunctions
+from nio_channel_bot.callbacks import Callbacks
+from nio_channel_bot.config import Config
+from nio_channel_bot.storage import Storage
+from nio_channel_bot.chat_functions import ChatFunctions
 
 logger = logging.getLogger(__name__)
 
